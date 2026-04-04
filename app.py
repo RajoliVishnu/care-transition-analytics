@@ -1257,12 +1257,23 @@ def render_sidebar_filters(df: pd.DataFrame):
     min_date = df["Date"].min().date()
     max_date = df["Date"].max().date()
 
-    start_date, end_date = st.sidebar.date_input(
+    date_selection = st.sidebar.date_input(
         "Select Date Range",
         value=(min_date, max_date),
         min_value=min_date,
         max_value=max_date,
     )
+
+    # Streamlit can return a single date or a date range depending on user interaction.
+    if isinstance(date_selection, tuple):
+        if len(date_selection) == 2:
+            start_date, end_date = date_selection
+        elif len(date_selection) == 1:
+            start_date = end_date = date_selection[0]
+        else:
+            start_date, end_date = min_date, max_date
+    else:
+        start_date = end_date = date_selection
 
     if start_date > end_date:
         start_date, end_date = end_date, start_date
@@ -1575,6 +1586,21 @@ def render_insights_section(filtered_df: pd.DataFrame):
         if backlog_trend > 0
         else "Backlog levels remained stable or declined across the selected period."
     )
+    transfer_action = (
+        "Prioritize transfers from high-volume CBP sites and monitor facilities with transfer efficiency below 30% weekly."
+        if transfer_mean < 0.30
+        else "Sustain current transfer workflows and replicate high-performing site practices in lower-performing regions."
+    )
+    placement_action = (
+        "Expand sponsor outreach and case documentation support to reduce discharge delays."
+        if discharge_mean < 0.01
+        else "Protect current discharge momentum by tracking time-to-placement and preventing case review bottlenecks."
+    )
+    backlog_action = (
+        "Trigger surge capacity planning where intake exceeds discharge for multiple periods."
+        if backlog_trend > 0
+        else "Use this window to clear legacy backlog and maintain discharge volume above intake."
+    )
 
     st.markdown('<div class="panel">', unsafe_allow_html=True)
     render_section_header(
@@ -1587,6 +1613,7 @@ def render_insights_section(filtered_df: pd.DataFrame):
             <div class="insight-title">Transfer Efficiency Trend</div>
             <div class="insight-text">
                 Average transfer efficiency is {transfer_mean:.2%}. {transfer_text}
+                <br><strong>Recommended action:</strong> {transfer_action}
             </div>
         </div>
         <div class="insight-item">
@@ -1594,6 +1621,7 @@ def render_insights_section(filtered_df: pd.DataFrame):
             <div class="insight-text">
                 Average discharge effectiveness is {discharge_mean:.2%} and average pipeline throughput is
                 {throughput_mean:.2%}. {placement_text}
+                <br><strong>Recommended action:</strong> {placement_action}
             </div>
         </div>
         <div class="insight-item">
@@ -1601,6 +1629,7 @@ def render_insights_section(filtered_df: pd.DataFrame):
             <div class="insight-text">
                 The net change in backlog across the selected period is {int(round(backlog_trend)):,}.
                 {backlog_text}
+                <br><strong>Recommended action:</strong> {backlog_action}
             </div>
         </div>
         """,
