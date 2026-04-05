@@ -50,6 +50,7 @@ When the app runs, the process happens in this order:
 6. Sidebar filters are applied
 7. Filtered data is used to build the dashboard
 8. Charts, KPI cards, insights, and footer are displayed
+9. Executive score, live monitor, and downloadable report are generated
 
 ## 4. Step-by-Step Internal Flow
 
@@ -277,6 +278,19 @@ It explains:
 - transfer efficiency trend
 - sponsor placement and discharge condition
 - backlog accumulation pattern
+
+## Step 15. Executive and Real-Time Layer
+
+The app now includes additional production-style sections:
+
+- `render_executive_scorecard()`
+  Generates a weighted performance score and grade.
+
+- `render_realtime_monitor()`
+  Shows latest intake/discharge/backlog metrics and threshold alerts.
+
+- `build_executive_report()`
+  Builds a text summary that can be downloaded from the dashboard.
 
 These are generated from the filtered data, so the insight text changes when the date range changes.
 

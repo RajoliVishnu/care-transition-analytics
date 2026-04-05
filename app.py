@@ -2,6 +2,8 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 
@@ -1003,6 +1005,100 @@ def inject_css():
                 border-color: rgba(20, 50, 74, 0.10);
             }}
 
+            .stTabs [data-baseweb="tab-list"] {{
+                gap: 0.35rem;
+                background: rgba(255, 255, 255, 0.65);
+                border: 1px solid rgba(47, 91, 234, 0.14);
+                border-radius: 14px;
+                padding: 0.25rem;
+            }}
+
+            .stTabs [data-baseweb="tab"] {{
+                border-radius: 10px;
+                font-weight: 700;
+                color: #334155;
+                padding: 0.45rem 0.95rem;
+            }}
+
+            .stTabs [aria-selected="true"] {{
+                background: linear-gradient(135deg, #2F5BEA, #4F46E5);
+                color: #FFFFFF;
+            }}
+
+            .stat-card {{
+                border-radius: 16px;
+                padding: 16px 18px;
+                border: 1px solid var(--card-border);
+                border-left: 6px solid var(--card-accent);
+                background: linear-gradient(180deg, var(--card-bg-start), var(--card-bg-end));
+                box-shadow: 8px 8px 18px rgba(0, 0, 0, 0.10), -4px -4px 8px rgba(255, 255, 255, 0.92);
+                min-height: 122px;
+                transition: transform 0.22s ease, box-shadow 0.22s ease;
+            }}
+
+            .stat-card:hover {{
+                transform: translateY(-4px);
+                box-shadow: 12px 12px 20px rgba(0, 0, 0, 0.13), -4px -4px 8px rgba(255, 255, 255, 0.94);
+            }}
+
+            .stat-title {{
+                color: #475569;
+                font-size: 15px;
+                font-weight: 700;
+                margin-bottom: 0.5rem;
+            }}
+
+            .stat-value {{
+                color: #0F172A;
+                font-size: 46px;
+                line-height: 1;
+                font-weight: 800;
+                letter-spacing: -0.02em;
+            }}
+
+            .status-alert {{
+                border-radius: 14px;
+                padding: 14px 16px;
+                font-size: 1.05rem;
+                font-weight: 700;
+                border: 1px solid transparent;
+                margin-top: 0.45rem;
+            }}
+
+            .status-alert.warning {{
+                background: linear-gradient(90deg, #FFF4D6, #FFE8B5);
+                border-color: #F4C96C;
+                color: #8A4B00;
+            }}
+
+            .status-alert.success {{
+                background: linear-gradient(90deg, #E8FAF0, #D8F5E5);
+                border-color: #86D7A8;
+                color: #12633A;
+            }}
+
+            [data-testid="stMetric"] {{
+                background: linear-gradient(180deg, #FFFFFF 0%, #F5F9FF 100%);
+                border: 1px solid #D8E4F3;
+                border-radius: 14px;
+                padding: 0.9rem 1rem;
+                box-shadow: 6px 6px 14px rgba(15, 23, 42, 0.08), -3px -3px 8px rgba(255, 255, 255, 0.9);
+            }}
+
+            [data-testid="stMetricLabel"] {{
+                color: #475569 !important;
+                font-weight: 700;
+            }}
+
+            [data-testid="stMetricValue"] {{
+                color: #0F172A !important;
+                font-weight: 800;
+            }}
+
+            [data-testid="stMetricDelta"] {{
+                color: #1D4ED8 !important;
+            }}
+
             @media (max-width: 900px) {{
                 .block-container {{
                     padding-left: 1rem;
@@ -1178,16 +1274,366 @@ def create_comparison_chart(data: pd.DataFrame):
     return fig
 
 
+def estimate_avg_stay_days(filtered_df: pd.DataFrame) -> float:
+    date_diffs = filtered_df["Date"].sort_values().diff().dropna().dt.days
+    period_days = float(date_diffs.median()) if not date_diffs.empty else 7.0
+    discharge_mean = filtered_df["Children discharged from HHS Care"].mean()
+    if discharge_mean <= 0:
+        return 0.0
+    return float((filtered_df["Children in HHS Care"].mean() / discharge_mean) * period_days)
+
+
+def calculate_portfolio_kpis(filtered_df: pd.DataFrame) -> dict[str, float]:
+    total_patients = float(filtered_df["Children discharged from HHS Care"].sum())
+    readmission_proxy = float(
+        np.clip(
+            (
+                (filtered_df["Backlog_Rate"] > 0).sum()
+                / max(len(filtered_df), 1)
+            ) * 100,
+            0,
+            100,
+        )
+    )
+    avg_stay_days = estimate_avg_stay_days(filtered_df)
+    return {
+        "total_patients": total_patients,
+        "readmission_proxy": readmission_proxy,
+        "avg_stay_days": avg_stay_days,
+    }
+
+
+def render_portfolio_kpi_cards(filtered_df: pd.DataFrame):
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    render_section_header(
+        "Extra KPI Snapshot",
+        "These two healthcare-style metrics are estimated from available operational data.",
+    )
+    metric_data = calculate_portfolio_kpis(filtered_df)
+    col1, col2, col3 = st.columns(3, gap="large")
+    col1.markdown(
+        f"""
+        <div class="stat-card" style="--card-accent:#2563EB; --card-border:#CFE0FF; --card-bg-start:#FFFFFF; --card-bg-end:#EEF4FF;">
+            <div class="stat-title">Total Patients Processed</div>
+            <div class="stat-value">{int(round(metric_data['total_patients'])):,}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    col2.markdown(
+        f"""
+        <div class="stat-card" style="--card-accent:#F59E0B; --card-border:#FFE2B2; --card-bg-start:#FFFFFF; --card-bg-end:#FFF6E8;">
+            <div class="stat-title">Readmission Risk (Estimated)</div>
+            <div class="stat-value">{metric_data['readmission_proxy']:.1f}%</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    col3.markdown(
+        f"""
+        <div class="stat-card" style="--card-accent:#16A34A; --card-border:#CDEFD9; --card-bg-start:#FFFFFF; --card-bg-end:#ECFDF3;">
+            <div class="stat-title">Avg Stay Duration (Estimated)</div>
+            <div class="stat-value">{metric_data['avg_stay_days']:.1f} days</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Note: This dataset does not have direct readmission events or patient-level stay records, so these are estimate-based proxy metrics."
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def calculate_executive_score(filtered_df: pd.DataFrame) -> tuple[float, str]:
+    transfer = float(np.clip(filtered_df["Transfer_Efficiency"].mean(), 0, 1))
+    discharge = float(np.clip(filtered_df["Discharge_Effectiveness"].mean() * 12, 0, 1))
+    throughput = float(np.clip(filtered_df["Pipeline_Throughput"].mean(), 0, 1))
+    backlog_health = float(
+        np.clip(1 - (filtered_df["Backlog_Rate"].mean() / max(filtered_df["Children apprehended and placed in CBP custody"].mean(), 1)), 0, 1)
+    )
+    score = (transfer * 0.35 + discharge * 0.20 + throughput * 0.25 + backlog_health * 0.20) * 100
+    if score >= 85:
+        grade = "A"
+    elif score >= 70:
+        grade = "B"
+    elif score >= 55:
+        grade = "C"
+    else:
+        grade = "D"
+    return float(score), grade
+
+
+def render_executive_scorecard(filtered_df: pd.DataFrame):
+    score, grade = calculate_executive_score(filtered_df)
+    trend = filtered_df["Backlog_Rate"].iloc[-1] - filtered_df["Backlog_Rate"].iloc[0]
+    status = "Improving" if trend <= 0 else "Under Pressure"
+
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    render_section_header(
+        "Overall Performance Score",
+        "A simple combined score based on transfer, discharge, throughput, and backlog health.",
+    )
+    col1, col2, col3 = st.columns([1, 1, 2], gap="large")
+    col1.metric("Performance Score", f"{score:.1f}/100")
+    col2.metric("Grade", grade)
+    col3.metric("Current Status", status)
+    st.progress(int(round(score)))
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_realtime_monitor(filtered_df: pd.DataFrame):
+    latest = filtered_df.iloc[-1]
+    recent_window = filtered_df.tail(8).copy()
+    avg_recent_backlog = recent_window["Backlog_Rate"].mean()
+
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    render_section_header(
+        "Current Operations Monitor",
+        "Latest snapshot with threshold-based alerts.",
+    )
+    c1, c2, c3, c4 = st.columns(4, gap="large")
+    c1.markdown(
+        f"""
+        <div class="stat-card" style="--card-accent:#3B82F6; --card-border:#CFE3FF; --card-bg-start:#FFFFFF; --card-bg-end:#EFF6FF;">
+            <div class="stat-title">Latest Intake</div>
+            <div class="stat-value">{int(latest['Children apprehended and placed in CBP custody']):,}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    c2.markdown(
+        f"""
+        <div class="stat-card" style="--card-accent:#14B8A6; --card-border:#C8F2EE; --card-bg-start:#FFFFFF; --card-bg-end:#EBFFFC;">
+            <div class="stat-title">Latest Discharge</div>
+            <div class="stat-value">{int(latest['Children discharged from HHS Care']):,}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    c3.markdown(
+        f"""
+        <div class="stat-card" style="--card-accent:#DC2626; --card-border:#F9CECE; --card-bg-start:#FFFFFF; --card-bg-end:#FFF1F1;">
+            <div class="stat-title">Latest Backlog</div>
+            <div class="stat-value">{int(latest['Backlog_Rate']):,}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    c4.markdown(
+        f"""
+        <div class="stat-card" style="--card-accent:#7C3AED; --card-border:#E5D6FF; --card-bg-start:#FFFFFF; --card-bg-end:#F6F0FF;">
+            <div class="stat-title">Data Freshness</div>
+            <div class="stat-value">{latest['Date'].strftime("%Y-%m-%d")}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    backlog_alert = latest["Backlog_Rate"] > avg_recent_backlog * 1.15
+    transfer_alert = latest["Transfer_Efficiency"] < 0.30
+    discharge_alert = latest["Discharge_Effectiveness"] < 0.01
+
+    if backlog_alert or transfer_alert or discharge_alert:
+        st.markdown(
+            """
+            <div class="status-alert warning">
+                Alert: One or more thresholds are crossed. Please review transfer and discharge flow.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            """
+            <div class="status-alert success">
+                Good: All monitored thresholds are in a normal range.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def build_executive_report(filtered_df: pd.DataFrame, start_date: pd.Timestamp, end_date: pd.Timestamp) -> str:
+    score, grade = calculate_executive_score(filtered_df)
+    backlog_change = int(round(filtered_df["Backlog_Rate"].iloc[-1] - filtered_df["Backlog_Rate"].iloc[0]))
+    return (
+        "Care Transition Analytics - Project Summary\n"
+        f"Selected Period: {start_date.date()} to {end_date.date()}\n"
+        f"Records: {len(filtered_df):,}\n\n"
+        "Top 3 Insights\n"
+        f"1) Transfer Efficiency: {filtered_df['Transfer_Efficiency'].mean():.2%}\n"
+        f"2) Discharge Effectiveness: {filtered_df['Discharge_Effectiveness'].mean():.2%}\n"
+        f"3) Backlog Net Change: {backlog_change:,}\n\n"
+        f"Overall Performance Score: {score:.1f}/100 (Grade {grade})\n"
+        "Recommended Decision: Increase placement support in backlog-heavy periods and review bottlenecks weekly.\n"
+        "Conclusion: Better intake-discharge balance improves overall system stability.\n"
+    )
+
+
+def render_plotly_charts(filtered_df: pd.DataFrame):
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    render_section_header(
+        "Interactive Analysis",
+        "Use hover and zoom to inspect trends in detail.",
+    )
+    chart_df = filtered_df.copy()
+    chart_df["Transfer Efficiency"] = chart_df["Transfer_Efficiency"]
+    chart_df["Discharge Effectiveness"] = chart_df["Discharge_Effectiveness"]
+    chart_df["Pipeline Throughput"] = chart_df["Pipeline_Throughput"]
+
+    efficiency_fig = px.line(
+        chart_df,
+        x="Date",
+        y=["Transfer Efficiency", "Discharge Effectiveness", "Pipeline Throughput"],
+        title="Efficiency Indicators Over Time",
+        color_discrete_sequence=[THEME["secondary"], THEME["accent"], THEME["warning"]],
+    )
+    efficiency_fig.update_layout(hovermode="x unified", yaxis_tickformat=".0%")
+    st.plotly_chart(efficiency_fig, use_container_width=True)
+
+    backlog_fig = px.area(
+        chart_df,
+        x="Date",
+        y="Backlog_Rate",
+        title="Backlog Pressure Trend",
+        color_discrete_sequence=[THEME["danger"]],
+    )
+    backlog_fig.update_layout(hovermode="x unified")
+    st.plotly_chart(backlog_fig, use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_drilldown_section(filtered_df: pd.DataFrame):
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    render_section_header(
+        "Drill-Down Analysis",
+        "Select one metric and quickly view top high/low periods.",
+    )
+    metric_map = {
+        "Transfer Efficiency": "Transfer_Efficiency",
+        "Discharge Effectiveness": "Discharge_Effectiveness",
+        "Pipeline Throughput": "Pipeline_Throughput",
+        "Backlog Rate": "Backlog_Rate",
+    }
+    selected_metric = st.selectbox("Select metric for drill-down", list(metric_map.keys()))
+    metric_col = metric_map[selected_metric]
+
+    ranked = filtered_df[["Date", metric_col]].copy()
+    ascending = selected_metric != "Backlog Rate"
+    ranked = ranked.sort_values(metric_col, ascending=ascending).head(10)
+    ranked["Date"] = ranked["Date"].dt.strftime("%Y-%m-%d")
+    ranked = ranked.rename(columns={metric_col: "Value"})
+
+    st.dataframe(ranked, use_container_width=True, hide_index=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_storytelling_section(filtered_df: pd.DataFrame):
+    transfer_mean = filtered_df["Transfer_Efficiency"].mean()
+    discharge_mean = filtered_df["Discharge_Effectiveness"].mean()
+    throughput_mean = filtered_df["Pipeline_Throughput"].mean()
+    backlog_change = filtered_df["Backlog_Rate"].iloc[-1] - filtered_df["Backlog_Rate"].iloc[0]
+
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    render_section_header(
+        "Top 3 Insights and Decision",
+        "Main takeaways from the selected date range.",
+    )
+    st.markdown(
+        f"""
+        1. **Transfer Efficiency:** Average transfer efficiency is **{transfer_mean:.2%}**, highlighting upstream movement strength.
+        2. **Discharge Performance:** Discharge effectiveness is **{discharge_mean:.2%}** with throughput at **{throughput_mean:.2%}**.
+        3. **Backlog Direction:** Backlog changed by **{int(round(backlog_change)):,}** over the selected period.
+        """
+    )
+
+    decision_text = (
+        "Scale sponsor-placement capacity and prioritize backlog-heavy periods."
+        if backlog_change > 0
+        else "Maintain current process controls and redirect resources to further reduce residual backlog."
+    )
+    st.markdown(f"**What decision can be taken?** {decision_text}")
+    st.markdown(
+        "**Recommendations:** 1) Do a weekly bottleneck review, 2) add capacity when backlog rises for 2+ periods, 3) copy workflows from high-performing periods."
+    )
+    st.markdown(
+        "**Conclusion:** The system works better when intake and discharge stay close. Long gaps increase pressure."
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_prediction_section(filtered_df: pd.DataFrame):
+    transfer_mean = filtered_df["Transfer_Efficiency"].mean()
+    discharge_mean = filtered_df["Discharge_Effectiveness"].mean()
+    throughput_mean = filtered_df["Pipeline_Throughput"].mean()
+    backlog_norm = float(np.clip(filtered_df["Backlog_Rate"].mean() / 10000, 0, 1))
+
+    risk_score = float(
+        np.clip((1 - transfer_mean) * 35 + (1 - discharge_mean) * 25 + (1 - throughput_mean) * 25 + backlog_norm * 15, 0, 100)
+    )
+    risk_label = "High" if risk_score >= 67 else "Medium" if risk_score >= 34 else "Low"
+
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    render_section_header(
+        "Risk Score (Estimate)",
+        "Simple heuristic score to flag possible delay risk.",
+    )
+    gauge = go.Figure(
+        go.Indicator(
+            mode="gauge+number",
+            value=risk_score,
+            title={"text": "Placement Delay Risk Score"},
+            gauge={
+                "axis": {"range": [0, 100]},
+                "bar": {"color": THEME["danger"]},
+                "steps": [
+                    {"range": [0, 34], "color": "#D1FAE5"},
+                    {"range": [34, 67], "color": "#FEF3C7"},
+                    {"range": [67, 100], "color": "#FEE2E2"},
+                ],
+            },
+        )
+    )
+    gauge.update_layout(height=300, margin={"t": 50, "b": 10, "l": 10, "r": 10})
+    st.plotly_chart(gauge, use_container_width=True)
+    st.markdown(
+        f"**Risk Band:** {risk_label}. Use this as an early warning indicator for additional staffing or transfer support."
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_about_section(filtered_df: pd.DataFrame):
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    render_section_header(
+        "About This Project",
+        "Short summary of what I built and how I approached it.",
+    )
+    st.markdown(
+        f"""
+        **Project:** Care Transition Analytics Dashboard  
+        **Dataset:** HHS Unaccompanied Children Program (`{len(filtered_df):,}` filtered records in current view)  
+        **What this dataset includes:** Intake, custody, transfers, HHS care census, and discharges  
+        **Tools used:** Streamlit, Pandas, NumPy, Matplotlib, Plotly  
+        **Built by:** Rajoli Vishnu Vardan Redy  
+        **Purpose:** Identify bottlenecks, monitor backlog pressure, and support practical operational decisions.  
+        **Method:** Clean data -> calculate KPIs -> review trend charts -> create alerts -> write recommendations.  
+        **Limitations:** This dataset has no patient-level readmission or true length-of-stay records, so those are shown as estimates.
+        """
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
 def render_header():
     st.markdown(
         """
         <div class="hero-banner">
-            <div class="hero-tag">Operational Analytics Dashboard</div>
+            <div class="hero-tag">Data Analyst Project Dashboard</div>
             <h1 class="hero-title">Care Transition Efficiency & Placement Outcome Analytics</h1>
             <div class="hero-subtitle">
-                Executive view of the UAC care pipeline, focused on transition efficiency, discharge
-                performance, throughput, and backlog behavior across CBP custody, HHS care, and sponsor
-                placement stages.
+                This dashboard tracks how children move through the UAC pipeline. It focuses on transfer
+                efficiency, discharge performance, throughput, and backlog across CBP custody, HHS care,
+                and sponsor placement stages.
             </div>
         </div>
         """,
@@ -1674,7 +2120,6 @@ def build_dashboard():
         st.error("No data is available for the selected date range.")
         return
 
-    render_overview_strip(filtered_df)
     st.markdown('<div class="download-wrap">', unsafe_allow_html=True)
     st.download_button(
         label="Download Filtered Data (CSV)",
@@ -1685,11 +2130,34 @@ def build_dashboard():
     )
     st.markdown("</div>", unsafe_allow_html=True)
     render_kpi_cards(filtered_df)
-    render_efficiency_section(filtered_df)
-    render_backlog_section(filtered_df)
-    render_comparison_section(filtered_df)
-    render_pipeline_section()
-    render_insights_section(filtered_df)
+    render_portfolio_kpi_cards(filtered_df)
+
+    tab_overview, tab_monitor, tab_analysis, tab_prediction, tab_about = st.tabs(
+        ["Overview", "Monitor", "Analysis", "Risk", "About"]
+    )
+
+    with tab_overview:
+        render_overview_strip(filtered_df)
+        render_efficiency_section(filtered_df)
+        render_backlog_section(filtered_df)
+        render_storytelling_section(filtered_df)
+
+    with tab_monitor:
+        render_realtime_monitor(filtered_df)
+        render_comparison_section(filtered_df)
+        render_drilldown_section(filtered_df)
+
+    with tab_analysis:
+        render_plotly_charts(filtered_df)
+        render_pipeline_section()
+        render_insights_section(filtered_df)
+
+    with tab_prediction:
+        render_prediction_section(filtered_df)
+
+    with tab_about:
+        render_about_section(filtered_df)
+
     render_footer(filtered_df, start_date, end_date)
 
 
